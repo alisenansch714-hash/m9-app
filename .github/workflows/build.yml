@@ -6,14 +6,14 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
@@ -26,9 +26,7 @@ jobs:
 
     - name: Build with Buildozer
       run: |
-        # إنشاء ملف إعدادات افتراضي تلقائياً
         buildozer init
-        # تعديل اسم التطبيق والملف الرئيسي ليتوافق مع M9.py
         sed -i 's/# title = My Application/title = M9 App/' buildozer.spec
         sed -i 's/# package.name = myapp/package.name = m9app/' buildozer.spec
         sed -i 's/# package.domain = org.test/package.domain = org.m9/' buildozer.spec
@@ -38,7 +36,6 @@ jobs:
         sed -i 's/# android.api = 33/android.api = 33/' buildozer.spec
         sed -i 's/# android.min_api = 21/android.min_api = 21/' buildozer.spec
         
-        # بدء عملية بناء ملف الـ APK
         buildozer -v android debug
 
     - name: Upload APK
