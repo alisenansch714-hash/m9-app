@@ -9,8 +9,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -23,18 +22,6 @@ jobs:
         sudo apt-get install -y build-essential libltdl-dev git python3-pip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5
         pip install --upgrade pip
         pip install buildozer cython==0.29.36
-        - name: Accept Android SDK Licenses
-        run: |
-        SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
-        mkdir -p "$SDK_DIR/licenses"
-
-        printf '%s\n' \
-          '8933bad161af4178b1185d1a37fbf41ea5269c55' \
-          'd56f5187479451eabf01fb78af6dfcb131a6481e' \
-          > "$SDK_DIR/licenses/android-sdk-license"
-
-        mkdir -p "$HOME/.android"
-        touch "$HOME/.android/repositories.cfg"
 
     - name: Build with Buildozer
       run: |
@@ -47,7 +34,6 @@ jobs:
         sed -i 's/# requirements = python3,kivy/requirements = python3,kivy/' buildozer.spec
         sed -i 's/# android.api = 33/android.api = 33/' buildozer.spec
         sed -i 's/# android.min_api = 21/android.min_api = 21/' buildozer.spec
-        
         buildozer -v android debug
 
     - name: Upload APK
