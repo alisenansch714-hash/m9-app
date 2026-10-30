@@ -19,17 +19,27 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libltdl-dev git python3-pip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5
+        sudo apt-get install -y build-essential libltdl-dev git python3-pip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 unzip wget
         pip install --upgrade pip
         pip install buildozer cython==0.29.36
 
-    - name: Accept Android SDK Licenses
+    - name: Setup Android SDK and Tools
       run: |
         SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
+        mkdir -p "$SDK_DIR/cmdline-tools"
+        
+        # تحميل حزمة الأدوات الرسمية
+        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O /tmp/cmdtools.zip
+        unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools_temp
+        
+        # ضبط المسار بالطريقة الصحيحة المتوافقة مع Buildozer
+        rm -rf "$SDK_DIR/cmdline-tools/latest"
+        mkdir -p "$SDK_DIR/cmdline-tools/latest"
+        mv /tmp/cmdtools_temp/cmdline-tools/* "$SDK_DIR/cmdline-tools/latest/"
+        
+        # إنشاء الرخص آلياً
         mkdir -p "$SDK_DIR/licenses"
         printf '%s\n' '8933bad161af4178b1185d1a37fbf41ea5269c55' 'd56f5187479451eabf01fb78af6dfcb131a6481e' > "$SDK_DIR/licenses/android-sdk-license"
-        mkdir -p "$HOME/.android"
-        touch "$HOME/.android/repositories.cfg"
 
     - name: Build with Buildozer
       run: |
