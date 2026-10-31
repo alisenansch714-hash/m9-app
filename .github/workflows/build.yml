@@ -2,60 +2,181 @@ name: Build Kivy APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential libltdl-dev git python3-pip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 unzip wget
-        pip install --upgrade pip
-        pip install buildozer cython==0.29.36
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
-    - name: Setup Android SDK and Tools
-      run: |
-        SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
-        mkdir -p "$SDK_DIR/cmdline-tools"
-        
-        # تحميل حزمة الأدوات الرسمية
-        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O /tmp/cmdtools.zip
-        unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools_temp
-        
-        # ضبط المسار بالطريقة الصحيحة المتوافقة مع Buildozer
-        rm -rf "$SDK_DIR/cmdline-tools/latest"
-        mkdir -p "$SDK_DIR/cmdline-tools/latest"
-        mv /tmp/cmdtools_temp/cmdline-tools/* "$SDK_DIR/cmdline-tools/latest/"
-        
-        # إنشاء الرخص آلياً
-        mkdir -p "$SDK_DIR/licenses"
-        printf '%s\n' '8933bad161af4178b1185d1a37fbf41ea5269c55' 'd56f5187479451eabf01fb78af6dfcb131a6481e' > "$SDK_DIR/licenses/android-sdk-license"
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential git zip unzip wget \
+            autoconf automake libtool libltdl-dev \
+            pkg-config cmake gettext \
+            zlib1g-dev libffi-dev libssl-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5
 
-    - name: Build with Buildozer
-      run: |
-        buildozer init
-        sed -i 's/# title = My Application/title = M9 App/' buildozer.spec
-        sed -i 's/# package.name = myapp/package.name = m9app/' buildozer.spec
-        sed -i 's/# package.domain = org.test/package.domain = org.m9/' buildozer.spec
-        sed -i 's/# source.include_exts = py,png,jpg,kv,atlas/source.include_exts = py,png,jpg,kv,atlas/' buildozer.spec
-        sed -i 's/source.file =/source.file = M9/' buildozer.spec
-        sed -i 's/# requirements = python3,kivy/requirements = python3,kivy/' buildozer.spec
-        sed -i 's/# android.api = 33/android.api = 33/' buildozer.spec
-        sed -i 's/# android.min_api = 21/android.min_api = 21/' buildozer.spec
-        buildozer -v android debug
+          python -m pip install --upgrade pip
+          python -m pip install \
+            buildozer \
+            "cython==0.29.36" \
+            setuptools \
+            wheel
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: package
-        path: bin/*.apk
+      - name: Install Android SDK and fix sdkmanager
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
+          TEMP_DIR="$(mktemp -d)"
+
+          mkdir -p "$SDK_DIR/cmdline-tools"
+
+          wget -q \
+            https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip \
+            -O "$TEMP_DIR/android-tools.zip"
+
+          unzip -q \
+            "$TEMP_DIR/android-tools.zip" \
+            -d "$TEMP_DIR/unpacked"
+
+          rm -rf "$SDK_DIR/cmdline-tools/latest"
+          mv "$TEMP_DIR/unpacked/cmdline-tools" \
+             "$SDK_DIR/cmdline-tools/latest"
+
+          # Create a real compatibility wrapper, not a symlink.
+          rm -rf "$SDK_DIR/tools"
+          mkdir -p "$SDK_DIR/tools/bin"
+
+          cat > "$SDK_DIR/tools/bin/sdkmanager" <<'SH'
+          #!/usr/bin/env bash
+          set -e
+          SDK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+          exec "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$@"
+          SH
+
+          chmod +x "$SDK_DIR/tools/bin/sdkmanager"
+          chmod +x "$SDK_DIR/cmdline-tools/latest/bin/"*
+
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "APP_ANDROID_SDK_PATH=$SDK_DIR" >> "$GITHUB_ENV"
+
+          echo "$SDK_DIR/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_DIR/platform-tools" >> "$GITHUB_PATH"
+
+          # Fail here, with a clear error, if the fix is not working.
+          test -x "$SDK_DIR/tools/bin/sdkmanager"
+          "$SDK_DIR/tools/bin/sdkmanager" \
+            --sdk_root="$SDK_DIR" --version
+
+          # Ignore only the expected SIGPIPE exit from yes.
+          set +o pipefail
+          yes | "$SDK_DIR/tools/bin/sdkmanager" \
+            --sdk_root="$SDK_DIR" --licenses
+          LICENSE_STATUS=${PIPESTATUS[1]}
+          set -o pipefail
+
+          if [ "$LICENSE_STATUS" -ne 0 ]; then
+            echo "ERROR: SDK license acceptance failed."
+            exit "$LICENSE_STATUS"
+          fi
+
+          "$SDK_DIR/tools/bin/sdkmanager" \
+            --sdk_root="$SDK_DIR" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2"
+
+          rm -rf "$TEMP_DIR"
+
+      - name: Configure Buildozer
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f buildozer.spec ]; then
+            buildozer init
+          fi
+
+          python - <<'PY'
+          import configparser
+          import os
+          from pathlib import Path
+
+          config = configparser.ConfigParser(interpolation=None)
+          config.read("buildozer.spec", encoding="utf-8")
+
+          if not config.has_section("app"):
+              config.add_section("app")
+
+          settings = {
+              "title": "M9 App",
+              "package.name": "m9app",
+              "package.domain": "org.m9",
+              "source.dir": ".",
+              "source.include_exts": "py,png,jpg,jpeg,kv,atlas",
+              "requirements": "python3,kivy",
+              "android.api": "33",
+              "android.minapi": "21",
+              "android.sdk_path": os.environ["ANDROID_SDK_ROOT"],
+              "android.accept_sdk_license": "True",
+              "android.skip_update": "True",
+          }
+
+          for key, value in settings.items():
+              config.set("app", key, value)
+
+          source_dir = Path(config.get("app", "source.dir"))
+          if not (source_dir / "main.py").is_file():
+              raise SystemExit(
+                  "ERROR: Put your application's main.py "
+                  "in the repository root."
+              )
+
+          with open("buildozer.spec", "w", encoding="utf-8") as file:
+              config.write(file)
+          PY
+
+      - name: Verify SDK and build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Verifying the exact sdkmanager path used by Buildozer:"
+          ls -l "$ANDROID_SDK_ROOT/tools/bin/sdkmanager"
+
+          "$ANDROID_SDK_ROOT/tools/bin/sdkmanager" \
+            --sdk_root="$ANDROID_SDK_ROOT" --version
+
+          buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: M9-APK
+          path: bin/*.apk
+          if-no-files-found: error
